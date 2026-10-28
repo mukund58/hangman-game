@@ -1,0 +1,6 @@
+{
+  "name": "Hangman — Multiplayer Word Guessing Game",
+  "description": "A modern single-player, pass-and-play, and online multiplayer Hangman word guessing game with a ruled-notebook paper aesthetic and complete Python Flet codebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
