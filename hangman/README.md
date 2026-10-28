@@ -124,4 +124,163 @@ Run the full test suite from the `hangman/` directory:
 
 ```bash
 PYTHONPATH=. pytest -v
+# Or use the zero-dependency runner:
+python3 run_tests.py
 ```
+
+---
+
+## 6. Deploying to Microsoft Azure
+
+Because Hangman uses **WebSockets** for real-time online multiplayer and **Flet** for the GUI, you can deploy the project to Microsoft Azure in two ways:
+- **Architecture 1**: Deploy the **Authoritative Python WebSocket Server** (`networking/server.py`) to Azure so desktop Flet clients (`python main.py`) anywhere in the world can connect via `wss://`.
+- **Architecture 2**: Deploy both the **Flet Web App** (`flet run --web`) and the **WebSocket Server** using **Azure Container Apps** or **Azure App Service**.
+
+### Prerequisites
+1. Install the [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) and sign in:
+   ```bash
+   az login
+   ```
+2. Create a Resource Group (e.g., in `eastus` or `centralindia`):
+   ```bash
+   az group create --name rg-hangman-game --location eastus
+   ```
+
+---
+
+### Option A: Deploy to Azure Container Apps (Recommended for WebSockets + Flet)
+
+Azure Container Apps natively supports WebSockets (`wss://`), automatic TLS certificates, and scale-to-zero or persistent single-instance rooms.
+
+#### Step 1: Verify the `Dockerfile` in `hangman/Dockerfile`
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Default port exposed by Azure
+ENV HANGMAN_WS_HOST=0.0.0.0
+ENV HANGMAN_WS_PORT=8765
+EXPOSE 8765
+
+# Run the authoritative WebSocket server
+CMD ["python", "-m", "networking.server"]
+```
+*(Note: To host the Flet Web GUI inside the container instead, change `EXPOSE 8000` and `CMD ["flet", "run", "--web", "--host", "0.0.0.0", "--port", "8000", "main.py"]`.)*
+
+#### Step 2: Deploy with a Single Azure CLI Command
+From inside the `hangman/` directory, run:
+
+```bash
+az containerapp up \
+  --name hangman-ws-server \
+  --resource-group rg-hangman-game \
+  --location eastus \
+  --environment env-hangman \
+  --source . \
+  --target-port 8765 \
+  --ingress external
+```
+
+#### Step 3: Lock Replica Count to 1 (Important for In-Memory Multiplayer Rooms)
+Since `RoomManager` stores active rooms in memory, set `min-replicas=1` and `max-replicas=1` so both players in a match always hit the same server instance:
+
+```bash
+az containerapp update \
+  --name hangman-ws-server \
+  --resource-group rg-hangman-game \
+  --min-replicas 1 \
+  --max-replicas 1
+```
+
+#### Step 4: Connect Your Flet Clients to Azure
+Azure will output a public FQDN such as `https://hangman-ws-server.<region>.azurecontainerapps.io`. Connect any local Flet client over secure WebSockets (`wss://` on port 443):
+
+```bash
+HANGMAN_WS_URL=wss://hangman-ws-server.<region>.azurecontainerapps.io python main.py
+```
+
+---
+
+### Option B: Deploy to Azure App Service (Linux Python 3.11 Web App)
+
+If you have an **Azure Student (`Azure for Students`)** subscription, **Azure App Service (B1 Basic or F1 Free tier)** is an easy way to host the server without Docker.
+
+#### Step 1: Create the App Service Plan and Python 3.11 Web App
+From inside the `hangman/` directory:
+
+```bash
+az webapp up \
+  --name hangman-multiplayer-<your-unique-id> \
+  --resource-group rg-hangman-game \
+  --runtime "PYTHON:3.11" \
+  --sku B1 \
+  --location eastus
+```
+
+#### Step 2: Enable WebSockets on Azure App Service
+WebSockets are disabled by default on Azure App Service. Enable them with:
+
+```bash
+az webapp config set \
+  --name hangman-multiplayer-<your-unique-id> \
+  --resource-group rg-hangman-game \
+  --web-sockets-enabled true
+```
+
+#### Step 3: Configure Port & Startup Command
+Azure App Service injects the `PORT` (or `WEBSITES_PORT`) environment variable (default `8000`). Set `HANGMAN_WS_PORT=8000` and configure the startup command:
+
+```bash
+az webapp config appsettings set \
+  --name hangman-multiplayer-<your-unique-id> \
+  --resource-group rg-hangman-game \
+  --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true HANGMAN_WS_HOST=0.0.0.0 HANGMAN_WS_PORT=8000 WEBSITES_PORT=8000
+
+az webapp config set \
+  --name hangman-multiplayer-<your-unique-id> \
+  --resource-group rg-hangman-game \
+  --startup-file "python -m networking.server"
+```
+
+#### Step 4: Connect Players to Your Azure App Service URL
+Once deployed, connect two players from anywhere using `wss://`:
+
+```bash
+HANGMAN_WS_URL=wss://hangman-multiplayer-<your-unique-id>.azurewebsites.net python main.py
+```
+
+---
+
+### Option C: Deploy the Full-Stack Web App (`server.ts` + React + WebSockets) to Azure App Service
+
+To deploy the full-stack browser version located in the workspace root:
+
+```bash
+# 1. Build the frontend bundle
+npm install
+npm run build
+
+# 2. Deploy to Azure App Service (Node 20 LTS)
+az webapp up \
+  --name hangman-web-<your-unique-id> \
+  --resource-group rg-hangman-game \
+  --runtime "NODE:20-lts" \
+  --sku B1
+
+# 3. Enable WebSockets and set PORT=3000
+az webapp config set \
+  --name hangman-web-<your-unique-id> \
+  --resource-group rg-hangman-game \
+  --web-sockets-enabled true
+
+az webapp config appsettings set \
+  --name hangman-web-<your-unique-id> \
+  --resource-group rg-hangman-game \
+  --settings NODE_ENV=production WEBSITES_PORT=3000 PORT=3000
+```
+

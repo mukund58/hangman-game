@@ -237,7 +237,12 @@ const PYTHON_FILES_META: Array<{ path: string; stage: string; responsibility: st
   {
     path: "hangman/README.md",
     stage: "Stage 7",
-    responsibility: "Complete Linux setup, virtual environment commands, LAN/Internet server guide, and pytest instructions.",
+    responsibility: "Complete Linux setup, virtual environment commands, LAN/Internet server guide, Azure deployment guide, and pytest instructions.",
+  },
+  {
+    path: "hangman/Dockerfile",
+    stage: "Stage 7",
+    responsibility: "Production Python 3.11 container definition for deploying to Azure Container Apps or Azure App Service.",
   },
   {
     path: "hangman/game/logic.py",
